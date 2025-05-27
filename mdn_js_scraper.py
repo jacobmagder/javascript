@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Change from INFO to DEBUG
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("mdn_scraper.log"),
@@ -124,11 +124,14 @@ class MDNJSScraper:
             "examples": self._extract_examples(soup),
             "browser_compatibility": self._extract_browser_compatibility(soup),
             "see_also": self._extract_see_also(soup),
+            # Add the new extraction:
+            **self._extract_inheritance_and_properties(soup),
             "children": []
         }
         
         # Find child pages and add to structure
         child_links = self._find_child_links(soup, url)
+        logger.info(f"Found {len(child_links)} child links on {url}")  # Add this line
         
         return {
             "content": content,
@@ -309,55 +312,91 @@ class MDNJSScraper:
         
         return see_also
     
-    def _find_child_links(self, soup, current_url):
-        """Find links to child pages in the sidebar or content area."""
-        child_links = []
+    def _extract_inheritance_and_properties(self, soup):
+        """Extract inheritance chain and object properties if available."""
+        result = {
+            "inheritance": [],
+            "properties": [],
+            "methods": []
+        }
         
         try:
-            # Look for sidebar navigation
-            sidebar = soup.find('nav', class_='sidebar')
-            if sidebar:
-                current_section = None
-                
-                # Find the active section in the sidebar
-                active_items = sidebar.find_all(class_=lambda c: c and 'selected' in c)
-                for active in active_items:
-                    parent_list = active.find_parent('ol') or active.find_parent('ul')
-                    if parent_list:
-                        current_section = parent_list
-                
-                # If we found the current section, get all links from it
-                if current_section:
-                    for link in current_section.find_all('a'):
-                        href = link.get('href')
-                        if href and '/docs/Web/JavaScript' in href:
-                            # Make URL absolute
-                            abs_url = urljoin(self.BASE_URL, href)
-                            # Avoid duplicates and non-JS pages
-                            if abs_url not in self.visited_urls and self._is_js_doc_page(abs_url):
-                                child_links.append(abs_url)
+            # Look for inheritance information
+            inheritance_section = soup.find(['h2', 'h3'], string=lambda text: text and ('Inheritance' in text))
+            if inheritance_section:
+                # Often shown as a list or diagram
+                next_elem = inheritance_section.find_next_sibling()
+                while next_elem and next_elem.name not in ['h2', 'h3']:
+                    if next_elem.name in ['ul', 'ol']:
+                        for item in next_elem.find_all('li'):
+                            result["inheritance"].append(item.text.strip())
+                    next_elem = next_elem.find_next_sibling()
             
-            # Look for links in the main content that might be related
-            article = soup.find('article')
-            if article:
-                # Find sections that might contain related links
-                for section in article.find_all(['section', 'div']):
-                    # Look for headings that suggest related content
-                    headings = section.find_all(['h2', 'h3'], string=lambda s: s and any(term in s.lower() for term in 
-                                                               ['related', 'objects', 'methods', 'properties', 'interfaces']))
-                    if headings:
-                        # Extract links from this section
-                        for link in section.find_all('a'):
-                            href = link.get('href')
-                            if href and '/docs/Web/JavaScript' in href:
-                                abs_url = urljoin(self.BASE_URL, href)
-                                if abs_url not in self.visited_urls and self._is_js_doc_page(abs_url):
-                                    child_links.append(abs_url)
+            # Look for properties table/list
+            properties_section = soup.find(['h2', 'h3'], string=lambda text: text and ('Properties' in text))
+            if properties_section:
+                next_elem = properties_section.find_next_sibling()
+                while next_elem and next_elem.name not in ['h2', 'h3']:
+                    if next_elem.name in ['dl', 'ul', 'table']:
+                        # For definition lists
+                        if next_elem.name == 'dl':
+                            for dt in next_elem.find_all('dt'):
+                                result["properties"].append({
+                                    "name": dt.text.strip(),
+                                    "description": dt.find_next('dd').text.strip() if dt.find_next('dd') else ""
+                                })
+                        # For tables
+                        elif next_elem.name == 'table':
+                            for row in next_elem.find_all('tr')[1:]:  # Skip header
+                                cells = row.find_all(['td', 'th'])
+                                if len(cells) >= 2:
+                                    result["properties"].append({
+                                        "name": cells[0].text.strip(),
+                                        "description": cells[1].text.strip()
+                                    })
+                    next_elem = next_elem.find_next_sibling()
+                    
+            # Look for methods table/list
+            methods_section = soup.find(['h2', 'h3'], string=lambda text: text and ('Methods' in text))
+            if methods_section:
+                # Similar to properties extraction
+                next_elem = methods_section.find_next_sibling()
+                while next_elem and next_elem.name not in ['h2', 'h3']:
+                    if next_elem.name in ['dl', 'ul', 'table']:
+                        # Extract method information similar to properties
+                        if next_elem.name == 'dl':
+                            for dt in next_elem.find_all('dt'):
+                                result["methods"].append({
+                                    "name": dt.text.strip(),
+                                    "description": dt.find_next('dd').text.strip() if dt.find_next('dd') else ""
+                                })
+                    next_elem = next_elem.find_next_sibling()
+                    
+        except Exception as e:
+            logger.debug(f"Error extracting inheritance/properties: {str(e)}")
         
+        return result
+    
+    def _find_child_links(self, soup, current_url):
+        """Find links to child pages anywhere in the article."""
+        child_links = set()
+        try:
+            # More aggressive link finding - search ALL links in the page
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                # Broaden link detection to catch more JS doc pages
+                if '/docs/Web/JavaScript/' in href or 'JavaScript/Reference' in href:
+                    # Ensure we get the full URL
+                    abs_url = urljoin(self.BASE_URL, href)
+                    if abs_url not in self.visited_urls and self._is_js_doc_page(abs_url):
+                        child_links.add(abs_url)
+                        # Debug - print each link found
+                        logger.debug(f"Found child link: {abs_url}")
+                    
         except Exception as e:
             logger.error(f"Error finding child links: {str(e)}")
-        
-        return list(set(child_links))  # Remove duplicates
+    
+        return list(child_links)
     
     def _is_js_doc_page(self, url):
         """Check if the URL is a JavaScript documentation page."""
@@ -398,12 +437,45 @@ class MDNJSScraper:
         """
         if url is None:
             url = self.JS_DOCS_URL
-            
-        # Process queue for breadth-first traversal
+
         queue = [url]
         processed_urls = set()
+
+        # Special handling for root - manually add key JS sections
+        if url == self.JS_DOCS_URL:
+            # Add important JavaScript sections manually
+            key_sections = [
+                "/en-US/docs/Web/JavaScript/Reference",
+                "/en-US/docs/Web/JavaScript/Reference/Global_Objects",
+                "/en-US/docs/Web/JavaScript/Guide",
+                "/en-US/docs/Web/JavaScript/Reference/Operators",
+                "/en-US/docs/Web/JavaScript/Reference/Statements",
+                "/en-US/docs/Web/JavaScript/Reference/Functions",
+                "/en-US/docs/Web/JavaScript/Reference/Classes"
+            ]
+            for section in key_sections:
+                abs_url = urljoin(self.BASE_URL, section)
+                if abs_url not in queue:
+                    queue.append(abs_url)
+                    logger.info(f"Added key section: {abs_url}")
+                
+            # Also find links on the root page
+            soup = self.request_page(url)
+            if soup:
+                # Add the root page content to the tree
+                root_data = self.get_page_content(url)
+                if root_data and 'content' in root_data:
+                    self._add_to_tree(url, root_data['content'])
+                
+                # Find all links to main JS sections and subpages
+                for a in soup.find_all('a', href=True):
+                    href = a['href']
+                    if href.startswith('/en-US/docs/Web/JavaScript/') and href != '/en-US/docs/Web/JavaScript':
+                        abs_url = urljoin(self.BASE_URL, href)
+                        if abs_url not in queue:
+                            queue.append(abs_url)
         
-        # Process each URL and its children
+        # Process queue for breadth-first traversal
         while queue:
             current_batch = []
             
@@ -599,7 +671,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nScraping interrupted by user.")
         print("Saving the data collected so far...")
-        
+            
         # Save whatever we have
         scraper.save_tree()
         
@@ -613,5 +685,5 @@ if __name__ == "__main__":
         try:
             scraper.save_tree()
             print("Partial data has been saved.")
-        except:
-            print("Failed to save partial data.")
+        except Exception as e:
+            print(f"Failed to save partial data: {e}")

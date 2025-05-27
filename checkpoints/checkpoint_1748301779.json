@@ -1,0 +1,32 @@
+{
+  "Guide": {
+    "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide",
+    "title": "JavaScript Guide",
+    "description": "The JavaScript Guide shows you how to use JavaScript and gives an overview of the language. If you need exhaustive information about a language feature, have a look at the JavaScript reference.\n\nThis Guide is divided into the following chapters.\n\nOverview: Introduction",
+    "syntax": [],
+    "parameters": [],
+    "return_value": "",
+    "examples": [],
+    "browser_compatibility": {},
+    "see_also": [],
+    "inheritance": [],
+    "properties": [],
+    "methods": [],
+    "children": []
+  },
+  "Reference": {
+    "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference",
+    "title": "JavaScript reference",
+    "description": "The JavaScript reference serves as a repository of facts about the JavaScript language. The entire language is described here in detail. As you write JavaScript code, you'll refer to these pages often (thus the title \"JavaScript reference\").\n\nThe JavaScript language is intended to be used within some larger environment, be it a browser, server-side scripts, or similar. For the most part, this reference attempts to be environment-agnostic and does not target a web browser environment.\n\nIf you are new to JavaScript, start with the guide. Once you have a firm grasp of the fundamentals, you can use the reference to get more details on individual objects and language constructs.",
+    "syntax": [],
+    "parameters": [],
+    "return_value": "",
+    "examples": [],
+    "browser_compatibility": {},
+    "see_also": [],
+    "inheritance": [],
+    "properties": [],
+    "methods": [],
+    "children": []
+  }
+}
